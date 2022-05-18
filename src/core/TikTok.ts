@@ -17,6 +17,7 @@ import { URLSearchParams } from 'url';
 import CONST from '../constant';
 import { sign, makeid } from '../helpers';
 import * as _ from "lodash";
+import * as HTMLParser from 'node-html-parser';
 
 import {
     PostCollector,
@@ -430,7 +431,7 @@ export class TikTokScraper extends EventEmitter {
         if (this.scrapeType !== 'trend' && !this.input) {
             return this.returnInitError('Missing input');
         }
-        console.log('version v2.1.1')
+        console.log('version v2.3')
         await this.mainLoop();
 
         if (this.event) {
@@ -1193,22 +1194,110 @@ export class TikTokScraper extends EventEmitter {
         if (!this.input) {
             throw new Error(`Username is missing`);
         }
-        let url = `https://m.tiktok.com/node/share/user/@${this.input}?`
-        let signature = await this.signGivenUrl(url)
-        let signedUrl = `${url}&_signature=${signature}`
+        let userAgent = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_3) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/80.0.3987.122 Safari/537.36'
+        let url = `https://www.tiktok.com/@${this.input}?`
         const options = {
+            url:url,
             method: 'GET',
-            uri: signedUrl
+        'headers':{
+            'User-Agent':userAgent,
+            'Connection': 'keep-alive',
+            "accept": "*/*",
+            "accept-language": "en-US,en;q=0.9",}
+        
         };
-        const response = await this.request<string>(options);
+
+        console.log('firing request')
+        const response = await rp(url,options);
+
+        console.log('received response', resolve)
+        // Get data from HTML content
+        let root = HTMLParser.parse(response);
+        let appContext = root.querySelector('#SIGI_STATE') 
+
+        if(appContext && appContext.text) 
+        {
+            let _json = JSON.parse(appContext.text).UserModule
+
+            let profileData = Object.values(_.get(_json,`users`))[0]
+            let statsData = Object.values(_.get(_json,`stats`))[0]
+            let data:any  = {user:{}, stats:{}, shareMeta:{}}
+            _.assign(data, { user: profileData })
+            _.assign(data, { stats: statsData })
+            return data
+        }  
+
+
+
+
         let parsedResponse = JSON.parse(response)
         let emptyResponse = _.isEmpty(_.get(parsedResponse, 'userInfo'))
+        let statusCode = _.get(parsedResponse, 'statusCode')
         if (!emptyResponse) {
             const userMetadata = parsedResponse;
             return userMetadata.userInfo;
         }
         if (emptyResponse) {
-            throw new Error(`User Profile [userInfo] returned empty, probably User does not exist`);
+            options['uri'] =`http://tiktok.com/@${this.input}`
+            options['method']='head'
+            options['resolveWithFullResponse']= true
+            try{
+                let headResponse =  await rp(options)
+                statusCode = headResponse.statusCode
+            }
+            catch(e){
+                statusCode = Object(e)['statusCode']
+            }
+            
+            /**
+             * {
+  "0": "OK",
+  "450": "CLIENT_PAGE_ERROR",
+  "10000": "VERIFY_CODE",
+  "10101": "SERVER_ERROR_NOT_500",
+  "10102": "USER_NOT_LOGIN",
+  "10111": "NET_ERROR",
+  "10113": "SHARK_SLIDE",
+  "10114": "SHARK_BLOCK",
+  "10119": "LIVE_NEED_LOGIN",
+  "10202": "USER_NOT_EXIST",
+  "10203": "MUSIC_NOT_EXIST",
+  "10204": "VIDEO_NOT_EXIST",
+  "10205": "HASHTAG_NOT_EXIST",
+  "10208": "EFFECT_NOT_EXIST",
+  "10209": "HASHTAG_BLACK_LIST",
+  "10210": "LIVE_NOT_EXIST",
+  "10211": "HASHTAG_SENSITIVITY_WORD",
+  "10212": "HASHTAG_UNSHELVE",
+  "10213": "VIDEO_LOW_AGE_M",
+  "10214": "VIDEO_LOW_AGE_T",
+  "10215": "VIDEO_ABNORMAL",
+  "10216": "VIDEO_PRIVATE_BY_USER",
+  "10217": "VIDEO_FIRST_REVIEW_UNSHELVE",
+  "10218": "MUSIC_UNSHELVE",
+  "10219": "MUSIC_NO_COPYRIGHT",
+  "10220": "VIDEO_UNSHELVE_BY_MUSIC",
+  "10221": "USER_BAN",
+  "10222": "USER_PRIVATE",
+  "10223": "USER_FTC",
+  "10224": "GAME_NOT_EXIST",
+  "10225": "USER_UNIQUE_SENSITIVITY",
+  "10227": "VIDEO_NEED_RECHECK",
+  "10228": "VIDEO_RISK",
+  "10229": "VIDEO_R_MASK",
+  "10230": "VIDEO_RISK_MASK",
+  "10231": "VIDEO_GEOFENCE_BLOCK",
+  "10404": "FYP_VIDEO_LIST_LIMIT",
+  "undefined": "MEDIA_ERROR"
+}
+             */
+            switch(statusCode){
+                case 10202 :  
+                case 404 :  throw new Error(`${statusCode} User does not exist`);
+                case 200 :
+                default : throw new Error(`${statusCode} transient error`);
+
+            }  
         }
         throw new Error(`Can't extract user metadata from the html page. Make sure that user does exist and try to use proxy`);
     }

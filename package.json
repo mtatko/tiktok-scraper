@@ -1,6 +1,6 @@
 {
     "name": "@mtatko/tiktok-scraper",
-    "version": "2.3.0",
+    "version": "2.5.0",
     "description": "TikTok Scraper & Downloader. Scrape information from User, Trending and HashTag pages and download video posts",
     "main": "./build/index.js",
     "types": "./build/index.d.ts",
